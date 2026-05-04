@@ -1,0 +1,8 @@
+# Ignore generated data and output files
+data/cdr_data.csv
+data/*.csv
+output/*
+!output/.gitkeep
+# Ignore python cache
+__pycache__/
+*.pyc
