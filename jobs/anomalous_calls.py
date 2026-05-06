@@ -46,28 +46,19 @@ def main():
 
     run_id = args.run_id
     input_path = "file:///data/cdr_data.csv"
-    output_path = f"file:///output/anomalous_call_detection/{run_id}"
+    output_path = f"hdfs://namenode:8020/output/anomalous_call_detection/{run_id}"
 
     spark = SparkSession.builder.appName("anomalous_calls").getOrCreate()
     sc = spark.sparkContext
 
-    # Read CSV as RDD
-    # Skip header
-    rdd = sc.textFile(input_path)
-    header = rdd.first()
-    rdd = rdd.filter(lambda line: line != header)
-    
-    input_record_count = rdd.count()
+    # Read CSV natively using DataFrames for optimal performance
+    df = spark.read.csv(input_path, header=True, inferSchema=True)
+    input_record_count = df.count()
 
-    # Parse CSV: caller_id, receiver_id, duration_sec, tower_id, timestamp, call_type, charge_amount
-    def parse_line(line):
-        parts = line.split(",")
-        caller_id = parts[0]
-        duration_sec = int(parts[2])
-        timestamp = parts[4]
-        return (caller_id, {"duration_sec": duration_sec, "timestamp": timestamp})
-
-    parsed_rdd = rdd.map(parse_line)
+    # Convert to Key-Value RDD for the Custom Partitioner
+    parsed_rdd = df.rdd.map(
+        lambda row: (row["caller_id"], {"duration_sec": row["duration_sec"], "timestamp": row["timestamp"]})
+    )
 
     # Apply Custom Partitioner
     # 10 partitions
@@ -98,7 +89,8 @@ def main():
     FileSystem = sc._gateway.jvm.org.apache.hadoop.fs.FileSystem
     Configuration = sc._gateway.jvm.org.apache.hadoop.conf.Configuration
     
-    fs = FileSystem.get(Configuration())
+    URI = sc._gateway.jvm.java.net.URI
+    fs = FileSystem.get(URI.create(output_path), Configuration())
     manifest_path = Path(f"{output_path}/_MANIFEST.json")
     out = fs.create(manifest_path)
     out.write(bytearray(json.dumps(manifest, indent=2), "utf-8"))

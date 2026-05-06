@@ -11,7 +11,7 @@ def main():
 
     run_id = args.run_id
     input_path = "file:///data/cdr_data.csv"
-    output_path = f"file:///output/top_callers_by_spend/{run_id}"
+    output_path = f"hdfs://namenode:8020/output/top_callers_by_spend/{run_id}"
 
     spark = SparkSession.builder.appName("top_callers").getOrCreate()
 
@@ -19,10 +19,18 @@ def main():
     df = spark.read.csv(input_path, header=True, inferSchema=True)
     input_record_count = df.count()
 
-    # Calculate top callers
-    # caller_id, charge_amount
-    result_df = df.groupBy("caller_id") \
-        .agg(spark_sum("charge_amount").alias("total_spend")) \
+    from pyspark.sql.functions import rand, ceil
+
+    # Salting to handle data skew (distributes whale caller records across 10 reducers)
+    df = df.withColumn("salt", ceil(rand() * 10))
+
+    # Phase 1: Partial Aggregation (grouped by caller and salt)
+    partial_df = df.groupBy("caller_id", "salt") \
+        .agg(spark_sum("charge_amount").alias("partial_spend"))
+
+    # Phase 2: Final Aggregation (grouped by caller only)
+    result_df = partial_df.groupBy("caller_id") \
+        .agg(spark_sum("partial_spend").alias("total_spend")) \
         .orderBy(col("total_spend").desc()) \
         .limit(100)
 
@@ -49,7 +57,8 @@ def main():
     FileSystem = sc._gateway.jvm.org.apache.hadoop.fs.FileSystem
     Configuration = sc._gateway.jvm.org.apache.hadoop.conf.Configuration
     
-    fs = FileSystem.get(Configuration())
+    URI = sc._gateway.jvm.java.net.URI
+    fs = FileSystem.get(URI.create(output_path), Configuration())
     manifest_path = Path(f"{output_path}/_MANIFEST.json")
     out = fs.create(manifest_path)
     out.write(bytearray(json.dumps(manifest, indent=2), "utf-8"))

@@ -11,7 +11,7 @@ def main():
 
     run_id = args.run_id
     input_path = "file:///data/cdr_data.csv"
-    output_path = f"file:///output/tower_utilization_heatmap/{run_id}"
+    output_path = f"hdfs://namenode:8020/output/tower_utilization_heatmap/{run_id}"
 
     spark = SparkSession.builder.appName("tower_heatmap").getOrCreate()
 
@@ -48,7 +48,8 @@ def main():
     FileSystem = sc._gateway.jvm.org.apache.hadoop.fs.FileSystem
     Configuration = sc._gateway.jvm.org.apache.hadoop.conf.Configuration
     
-    fs = FileSystem.get(Configuration())
+    URI = sc._gateway.jvm.java.net.URI
+    fs = FileSystem.get(URI.create(output_path), Configuration())
     manifest_path = Path(f"{output_path}/_MANIFEST.json")
     out = fs.create(manifest_path)
     out.write(bytearray(json.dumps(manifest, indent=2), "utf-8"))
