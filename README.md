@@ -1,98 +1,148 @@
-# Hadoop-Based Batch Analytics Pipeline for CDR
+# CDR Analytics Pipeline
 
-A production-style batch analytics pipeline for processing telecommunications Call Detail Records (CDRs) using **Apache Spark**, **Hadoop HDFS**, and **Apache Airflow**.
+This project is a batch analytics pipeline for telecom Call Detail Records (CDRs).
 
-## 📊 Overview
-This project implements a high-performance distributed processing system designed to handle massive datasets with significant data skew. It features custom partitioning and salting strategies to optimize computations for 2,000,000+ records.
+It uses:
+- Apache Spark for distributed processing
+- Hadoop HDFS for storage
+- Apache Airflow for orchestration
+- Docker Compose to run the full stack locally
 
----
+## What the project does
 
-## 🏗️ System Architecture
+The pipeline reads a large CSV file of telecom records and runs analytics jobs on it.
 
-```mermaid
-graph TD
-    A[Data Generator] -->|Saves to| B[(Local data/ folder)]
-    B -->|Mounted as| C[Spark Driver]
-    D[Airflow Scheduler] -->|Triggers| C
-    C -->|Distributes Tasks| E[Spark Worker]
-    E -->|Reads Local CSV| B
-    E -->|Writes Partitions| F[(HDFS Namenode/Datanode)]
-    C -->|Writes _MANIFEST.json| F
-    G[User] -->|Triggers| D
-    G -->|Monitors| H[Spark UI / Airflow UI]
+Each run:
+- reads the input data
+- processes it with Spark
+- writes the result to HDFS
+- writes a `_MANIFEST.json` file with run details
+
+## Dataset
+
+The data is generated automatically from [data/generate.py](/abs/path/c:/Users/user/Desktop/Dev/cdr-analytics-pipeline/data/generate.py).
+
+Important facts:
+- It creates `2,000,000` records
+- It includes a high-volume caller named `WHALE_CALLER_001`
+- It includes a small number of abnormal long-duration calls
+
+This helps demonstrate both analytics logic and data skew handling.
+
+## Jobs
+
+### `top_callers`
+Finds the top 100 callers by total spend.
+
+Special point:
+- uses salting to reduce data skew from the whale caller
+
+### `tower_heatmap`
+Counts calls by `tower_id` and hour of day.
+
+Special point:
+- helps show tower usage patterns
+
+### `anomalous_calls`
+Detects unusual calls based on caller-level duration behavior.
+
+Special point:
+- uses a custom partitioner so records for the same caller stay together
+
+### `revenue_recon`
+Calculates total revenue from the full dataset.
+
+Special point:
+- simple business validation metric
+
+## Architecture
+
+Flow:
+1. Data is generated into `data/cdr_data.csv`
+2. Airflow triggers a Spark job
+3. Spark reads the CSV file
+4. Spark writes results to HDFS
+5. Output is stored by job name and run ID
+
+## Project structure
+
+- `data/` - generated input data and generator scripts
+- `jobs/` - PySpark analytics jobs
+- `dags/` - Airflow DAGs
+- `output/` - mounted output directory used with HDFS
+- `run_pipeline.sh` - Bash launcher
+- `run_pipeline.ps1` - PowerShell launcher for Windows
+
+## Prerequisites
+
+- Docker Desktop
+- At least 8 GB RAM available to Docker
+
+## Start the project
+
+```bash
+docker compose up -d --build
 ```
 
-### Technology Stack
-- **Storage**: HDFS (Hadoop 3.2.1)
-- **Processing Engine**: Apache Spark 3.5.0
-- **Orchestration**: Apache Airflow 2.8.0
-- **Environment**: Dockerized (Multi-container architecture)
+Wait until all containers are healthy.
 
----
+## Airflow login
 
-## 🚀 Key Performance Features
+Open:
+- `http://localhost:8082`
 
-### 1. Data Skew Mitigation (Salting)
-Telecom data often contains "Whale Callers" (users with 100x more records than average). 
-- **Problem**: A single Spark task processing a Whale Caller becomes a bottleneck (the "straggler" effect).
-- **Solution**: Implemented a **Salting Strategy** in `top_callers.py`. We add a random salt to the skewed key, distribute the partial aggregation across multiple tasks, and perform a final global aggregation.
+Login with:
+- username: `admin`
+- password: `admin`
 
-### 2. Custom RDD Partitioner
-For queries requiring user-level statistics (e.g., mean/stddev in `anomalous_calls.py`), data locality is critical.
-- **Solution**: Built a custom hash-based partitioner to ensure all records for a given `caller_id` are processed by the same reducer, minimizing network shuffles and enabling efficient local stateful aggregations.
+## Run a job
 
-### 3. Native Spark CSV Ingestion
-Replaced manual string parsing with Spark's native DataFrame CSV reader, utilizing schema inference and optimized ingestion for a 5x speedup in data loading.
+### On Windows PowerShell
 
----
-
-## 📂 Project Structure
-- `data/`: Raw CDR data and generation scripts.
-- `jobs/`: PySpark implementation for the 4 analytical queries.
-- `dags/`: Airflow DAG definitions for orchestration.
-- `output/`: Local mount for viewing job results (HDFS-integrated).
-
----
-
-## 🛠️ Setup & Execution
-
-### Prerequisites
-- Docker & Docker Desktop.
-- At least 8GB RAM allocated to Docker.
-
-### 1. Start the Cluster
-```bash
-docker-compose up -d --build
+```powershell
+.\run_pipeline.ps1 top_callers
 ```
-*Wait for all containers (Airflow, Namenode, Spark) to become healthy.*
 
-### 2. Run an Analytical Query
-Use the provided utility script to trigger specific DAGs:
+### On Bash
+
 ```bash
-# Available: top_callers, tower_heatmap, anomalous_calls, revenue_recon
 ./run_pipeline.sh top_callers
 ```
 
-### 3. Verify Results in HDFS
-Jobs produce output in HDFS along with a `_MANIFEST.json` containing record counts and latency metrics.
-```bash
-# List all outputs
-docker exec namenode hdfs dfs -ls -R /output
+Supported job names:
+- `top_callers`
+- `tower_heatmap`
+- `anomalous_calls`
+- `revenue_recon`
 
-# View a specific manifest
+## Monitoring URLs
+
+- Airflow: `http://localhost:8082`
+- Spark Master UI: `http://localhost:8081`
+- Hadoop Namenode UI: `http://localhost:9870`
+
+## Check output
+
+List all output folders:
+
+```bash
+docker exec namenode hdfs dfs -ls -R /output
+```
+
+View top callers output folders:
+
+```bash
+docker exec namenode hdfs dfs -ls /output/top_callers_by_spend
+```
+
+View a manifest:
+
+```bash
 docker exec namenode hdfs dfs -cat /output/top_callers_by_spend/<run_id>/_MANIFEST.json
 ```
 
----
+## Notes
 
-## 📈 Monitoring Dashboards
-- **Airflow**: [http://localhost:8082](http://localhost:8082) (Login: `admin`/`admin`)
-- **Spark Master**: [http://localhost:8081](http://localhost:8081)
-- **Hadoop Namenode**: [http://localhost:9870](http://localhost:9870)
-
----
-
-## 📝 Design Decisions
-- **HDFS Integration**: Switched from local bind-mounts to HDFS to resolve distributed permission issues across Docker containers.
-- **SequentialExecutor**: Used in Airflow for a simplified single-node deployment suitable for batch processing demonstrations.
-- **Observability**: Implemented a manifest system using Py4J to allow Spark drivers to write metadata directly to HDFS.
+- The launcher automatically unpauses the DAG before triggering it.
+- The Airflow DAG uses the Airflow run ID when no custom `run_id` is passed.
+- First runs can take a little time because Spark needs to start the application and executor.
