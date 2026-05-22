@@ -16,5 +16,5 @@ with DAG(
 
     submit_job = BashOperator(
         task_id='submit_spark_job',
-        bash_command='spark-submit --master spark://spark-master:7077 /jobs/anomalous_calls.py --run_id {{ dag_run.conf.get("run_id", "default_run") }}'
+        bash_command='spark-submit --master spark://spark-master:7077 /jobs/anomalous_calls.py --run_id {{ dag_run.conf.get("run_id", dag_run.run_id) if dag_run.conf else dag_run.run_id }}'
     )

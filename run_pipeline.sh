@@ -30,6 +30,7 @@ esac
 
 echo "Triggering DAG: $DAG_ID with RUN_ID: $RUN_ID"
 
-docker exec airflow airflow dags trigger -r $RUN_ID --conf "{\"run_id\":\"$RUN_ID\"}" $DAG_ID
+docker exec airflow airflow dags unpause "$DAG_ID"
+docker exec airflow airflow dags trigger "$DAG_ID" -r "$RUN_ID"
 
 echo "DAG triggered successfully. Check Airflow UI for progress."
